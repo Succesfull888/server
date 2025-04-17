@@ -4,7 +4,7 @@ let enqueueSnackbarRef;
 
 // Create an instance of axios
 const api = axios.create({
-  baseURL: process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000',
+  baseURL: process.env.NODE_ENV === 'production' ? '' : 'https://new-cefr-exam.vercel.app/',
   headers: {
     'Content-Type': 'application/json'
   }
