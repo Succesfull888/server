@@ -13,8 +13,14 @@ dotenv.config();
 const app = express();
 
 // Middleware
+// server.js yoki app.js faylida
+const cors = require('cors');
+
 app.use(cors({
-  origin: 'https://new-cefr-exam.vercel.app',
+  origin: [
+    'https://new-cefr-exam.vercel.app',
+    'https://new-cefr-exam-p2j2.vercel.app'
+  ],
   credentials: true
 }));
 
