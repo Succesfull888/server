@@ -14,7 +14,6 @@ const app = express();
 
 // Middleware
 // server.js yoki app.js faylida
-const cors = require('cors');
 
 app.use(cors({
   origin: [
