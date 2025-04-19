@@ -6,7 +6,7 @@ const path = require('path');
 
 const authRoutes = require('./routes/auth');
 const examRoutes = require('./routes/exam');
-// ... other routes ...
+const adminRoutes = require('./routes/admin'); // YANGI QO'SHILGAN
 
 const app = express();
 
@@ -84,7 +84,7 @@ mongoose.connection.on('connected', () => console.log('✅ MongoDB connected eve
 //---- Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/exams', examRoutes);
-// ... other routes ...
+app.use('/api/admin', adminRoutes); // YANGI QO'SHILGAN - muhim!
 
 //---- Health endpoint for status checks
 app.get('/api/health', (req, res) => {
@@ -106,6 +106,12 @@ app.get('/api/health', (req, res) => {
       database: mongoose.connection.name
     }
   });
+});
+
+// Debug middleware - so'rovlarni log qilish uchun
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  next();
 });
 
 //---- 404 Not Found handler
