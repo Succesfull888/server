@@ -11,6 +11,9 @@ router.get('/users', [auth, admin], userController.getAllUsers);
 // Get all exams
 router.get('/exams', [auth, admin], examController.getAllExams);
 
+// Delete exam
+router.delete('/exams/:id', [auth, admin], examController.deleteExam);
+
 // Delete user
 router.delete('/users/:id', [auth, admin], userController.deleteUser);
 
