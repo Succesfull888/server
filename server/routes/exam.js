@@ -5,6 +5,14 @@ const admin = require('../middleware/admin');
 const examController = require('../controllers/exam');
 const upload = require('../middleware/upload');
 
+// Root endpoint - API haqida ma'lumot
+router.get('/', (req, res) => {
+  res.json({
+    message: 'CEFR Speaking Exam API',
+    endpoints: ['/templates', '/my-exams', '/templates/:id', '/:id']
+  });
+});
+
 // @route   GET api/exams/templates
 // @desc    Get all exam templates
 // @access  Private
@@ -40,24 +48,14 @@ router.post('/submit', auth, examController.submitExam);
 // @access  Private
 router.get('/my-exams', auth, examController.getUserExams);
 
-// @route   GET api/exams/:id
-// @desc    Get exam by ID
-// @access  Private
-router.get('/:id', auth, examController.getExamById);
-
 // @route   PUT api/exams/:id/evaluate
 // @desc    Evaluate an exam
 // @access  Admin
 router.put('/:id/evaluate', [auth, admin], examController.evaluateExam);
 
-// @route   GET api/exams/admin/exams
-// @desc    Get all exams
-// @access  Admin
-router.get('/admin/exams', [auth, admin], examController.getAllExams);
-
-// @route   DELETE api/exams/admin/exams/:id
-// @desc    Delete an exam
-// @access  Admin
-router.delete('/admin/exams/:id', [auth, admin], examController.deleteExam);
+// @route   GET api/exams/:id
+// @desc    Get exam by ID
+// @access  Private
+router.get('/:id', auth, examController.getExamById);
 
 module.exports = router;
