@@ -4,8 +4,6 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
-// ...existing code...
-
 // Get all exam templates
 exports.getExamTemplates = async (req, res) => {
   try {
@@ -111,16 +109,46 @@ exports.submitExam = async (req, res) => {
         return res.status(400).json({ message: 'Invalid audio data' });
       }
       
-      const audioBase64 = audioBlob.split(';base64,').pop();
-      const fileName = `${uuidv4()}.webm`;
-      const filePath = path.join(uploadsDir, fileName);
-      
-      fs.writeFileSync(filePath, audioBase64, { encoding: 'base64' });
-      
-      processedResponses.push({
-        questionId,
-        audioUrl: `/uploads/${fileName}`
-      });
+      try {
+        // Extract MIME type from the base64 string
+        const mimeMatch = audioBlob.match(/^data:([^;]+);base64,/);
+        let mimeType = mimeMatch ? mimeMatch[1] : 'audio/mp3';
+        
+        // Always set extension to mp3 for better compatibility
+        const fileExt = '.mp3';
+        
+        // Remove the MIME type prefix to get the pure base64 content
+        const audioBase64 = audioBlob.split(';base64,').pop();
+        const fileName = `${uuidv4()}${fileExt}`;
+        const filePath = path.join(uploadsDir, fileName);
+        
+        // Log information for debugging
+        console.log(`Saving audio file: ${fileName}, MIME: ${mimeType}`);
+        
+        // Write the file
+        fs.writeFileSync(filePath, audioBase64, { encoding: 'base64' });
+        
+        // Verify file was created successfully
+        if (!fs.existsSync(filePath)) {
+          throw new Error('Failed to write audio file');
+        }
+        
+        const fileStats = fs.statSync(filePath);
+        console.log(`File saved: ${filePath}, size: ${fileStats.size} bytes`);
+        
+        // Use absolute URL for audioUrl
+        const host = req.get('host');
+        const protocol = req.protocol;
+        const fullAudioUrl = `${protocol}://${host}/uploads/${fileName}`;
+        
+        processedResponses.push({
+          questionId,
+          audioUrl: fullAudioUrl // Use full URL instead of relative path
+        });
+      } catch (fileError) {
+        console.error('Error saving audio file:', fileError);
+        return res.status(500).json({ message: 'Error saving audio file' });
+      }
     }
     
     // Create new exam submission
@@ -255,11 +283,18 @@ exports.deleteExam = async (req, res) => {
     
     // Delete associated audio files
     for (const response of exam.responses) {
-      const fileName = response.audioUrl.split('/').pop();
+      // Extract filename from URL - handle both relative and absolute URLs
+      const fileName = response.audioUrl.includes('/') 
+        ? response.audioUrl.split('/').pop() 
+        : response.audioUrl;
+        
       const filePath = path.join(__dirname, '../uploads', fileName);
       
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
+        console.log(`Deleted audio file: ${filePath}`);
+      } else {
+        console.log(`Audio file not found: ${filePath}`);
       }
     }
     
