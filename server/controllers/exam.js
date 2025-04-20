@@ -1,8 +1,9 @@
-const { ExamTemplate, Exam } = require('../models/Exam'); // Updated to match the correct casing
+const { ExamTemplate, Exam, ExamQuestion } = require('../models/Exam');
 const User = require('../models/User');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const mongoose = require('mongoose');
 
 // Get all exam templates
 exports.getExamTemplates = async (req, res) => {
@@ -88,10 +89,16 @@ exports.deleteExamTemplate = async (req, res) => {
   }
 };
 
-// Submit exam
+// Submit exam - To'liq ma'lumotlarni saqlash versiyasi
 exports.submitExam = async (req, res) => {
   try {
     const { examTemplateId, responses } = req.body;
+    
+    // Exam templateni olish
+    const examTemplate = await ExamTemplate.findById(examTemplateId);
+    if (!examTemplate) {
+      return res.status(404).json({ message: 'Exam template not found' });
+    }
     
     // Check if uploads directory exists
     const uploadsDir = path.join(__dirname, '../uploads');
@@ -99,11 +106,23 @@ exports.submitExam = async (req, res) => {
       fs.mkdirSync(uploadsDir, { recursive: true });
     }
     
-    // Save audio files
-    const processedResponses = [];
+    // Saqlash massivlari
+    const processedResponses = [];  // Eski format
+    const processedAnswers = [];    // Yangi format
     
     for (const response of responses) {
       const { questionId, audioBlob } = response;
+      
+      // Savol ma'lumotlarini topish
+      const questionData = examTemplate.questions.find(
+        q => q._id.toString() === questionId
+      );
+      
+      if (!questionData) {
+        console.warn(`Question with ID ${questionId} not found in template`);
+        continue;
+      }
+      
       // Verify base64 data exists
       if (!audioBlob || !audioBlob.includes(';base64,')) {
         return res.status(400).json({ message: 'Invalid audio data' });
@@ -141,10 +160,30 @@ exports.submitExam = async (req, res) => {
         const protocol = req.protocol;
         const fullAudioUrl = `${protocol}://${host}/uploads/${fileName}`;
         
+        // Eski format uchun
         processedResponses.push({
           questionId,
-          audioUrl: fullAudioUrl // Use full URL instead of relative path
+          audioUrl: fullAudioUrl
         });
+        
+        // Yangi format uchun - to'liq ma'lumotlarni saqlash
+        processedAnswers.push({
+          question: questionId,
+          // Savol ma'lumotlarini to'liq saqlash
+          questionData: {
+            question: questionData.question,
+            questionType: questionData.questionType,
+            imageUrl: questionData.imageUrl,
+            tableData: questionData.tableData ? {
+              topic: questionData.tableData.topic || '',
+              columns: Array.isArray(questionData.tableData.columns) ? questionData.tableData.columns : [],
+              rows: Array.isArray(questionData.tableData.rows) ? questionData.tableData.rows : []
+            } : null,
+            part: questionData.part
+          },
+          audioUrl: fullAudioUrl
+        });
+        
       } catch (fileError) {
         console.error('Error saving audio file:', fileError);
         return res.status(500).json({ message: 'Error saving audio file' });
@@ -155,7 +194,8 @@ exports.submitExam = async (req, res) => {
     const newExam = new Exam({
       student: req.user.id,
       examTemplate: examTemplateId,
-      responses: processedResponses
+      responses: processedResponses,  // Eski format
+      answers: processedAnswers       // Yangi format
     });
     
     await newExam.save();
@@ -190,9 +230,10 @@ exports.getUserExams = async (req, res) => {
   }
 };
 
-// Get specific exam details
+// Get specific exam details - Yangilangan versiya
 exports.getExamById = async (req, res) => {
   try {
+    // Exam ma'lumotlarini olish
     const exam = await Exam.findById(req.params.id)
       .populate('examTemplate')
       .populate('student', 'firstName lastName username');
@@ -206,6 +247,65 @@ exports.getExamById = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
     
+    // Agar answers mavjud bo'lmasa, ularni responses va examTemplate dan yaratish
+    if (!exam.answers || exam.answers.length === 0) {
+      if (exam.responses && exam.responses.length > 0 && exam.examTemplate && exam.examTemplate.questions) {
+        const answersToAdd = [];
+        
+        for (const response of exam.responses) {
+          // Savol ma'lumotlarini topish
+          const questionData = exam.examTemplate.questions.find(
+            q => q._id.toString() === response.questionId.toString()
+          );
+          
+          if (questionData) {
+            // Yangi answer yaratish
+            answersToAdd.push({
+              question: response.questionId,
+              questionData: {
+                question: questionData.question,
+                questionType: questionData.questionType,
+                imageUrl: questionData.imageUrl,
+                tableData: questionData.tableData || { topic: '', columns: [], rows: [] },
+                part: questionData.part
+              },
+              audioUrl: response.audioUrl
+            });
+          }
+        }
+        
+        // Ma'lumotlar mavjud bo'lsa saqlab qo'yish
+        if (answersToAdd.length > 0) {
+          exam.answers = answersToAdd;
+          await exam.save();
+          console.log(`Added ${answersToAdd.length} answers to exam ${exam._id}`);
+        }
+      }
+    }
+    
+    // Debug - barcha savollar bo'limini tekshirish
+    // Part 1, 2, 3 savollarini tekshirish
+    const part1Answers = exam.answers?.filter(a => a.questionData?.part === 1) || [];
+    const part2Answers = exam.answers?.filter(a => a.questionData?.part === 2) || [];
+    const part3Answers = exam.answers?.filter(a => a.questionData?.part === 3) || [];
+    
+    console.log(`Exam has ${part1Answers.length} Part 1 answers, ${part2Answers.length} Part 2 answers, and ${part3Answers.length} Part 3 answers`);
+    
+    // Server log - Part 3 ma'lumotlarini tekshirish
+    if (part3Answers.length > 0) {
+      const part3 = part3Answers[0];
+      console.log("Part 3 answer:", {
+        question: part3.questionData?.question || 'No question',
+        hasTable: !!part3.questionData?.tableData,
+        tableInfo: part3.questionData?.tableData ? {
+          topic: part3.questionData.tableData.topic || 'No topic',
+          columnsCount: Array.isArray(part3.questionData.tableData.columns) ? part3.questionData.tableData.columns.length : 0,
+          rowsCount: Array.isArray(part3.questionData.tableData.rows) ? part3.questionData.tableData.rows.length : 0
+        } : 'No table data',
+        audioUrl: part3.audioUrl || 'No audio'
+      });
+    }
+    
     res.json(exam);
   } catch (error) {
     console.error('Get exam error:', error);
@@ -216,17 +316,36 @@ exports.getExamById = async (req, res) => {
 // Evaluate exam (admin only)
 exports.evaluateExam = async (req, res) => {
   try {
-    const { feedback, totalScore } = req.body;
+    const { feedback, totalScore, answerFeedbacks } = req.body;
     
     const exam = await Exam.findById(req.params.id);
     if (!exam) {
       return res.status(404).json({ message: 'Exam not found' });
     }
     
+    // To'liq feedback ma'lumotlarini saqlash
     exam.feedback = feedback;
     exam.totalScore = totalScore;
     exam.status = 'evaluated';
     exam.evaluatedAt = Date.now();
+    
+    // Individual answer feedbacks
+    if (answerFeedbacks && Object.keys(answerFeedbacks).length > 0) {
+      // Agar answers mavjud bo'lsa
+      if (exam.answers && exam.answers.length > 0) {
+        exam.answers = exam.answers.map(answer => {
+          const answerFeedback = answerFeedbacks[answer._id];
+          if (answerFeedback) {
+            return {
+              ...answer.toObject(),
+              score: answerFeedback.score || 0,
+              feedback: answerFeedback.feedback || ''
+            };
+          }
+          return answer;
+        });
+      }
+    }
     
     await exam.save();
     
@@ -282,11 +401,33 @@ exports.deleteExam = async (req, res) => {
     }
     
     // Delete associated audio files
-    for (const response of exam.responses) {
+    // Responses va answers dan audio fayllarni yig'ish
+    const audioUrls = [];
+    
+    // Responses dan olish
+    if (exam.responses && exam.responses.length > 0) {
+      exam.responses.forEach(response => {
+        if (response.audioUrl) {
+          audioUrls.push(response.audioUrl);
+        }
+      });
+    }
+    
+    // Answers dan olish (agar mavjud bo'lsa)
+    if (exam.answers && exam.answers.length > 0) {
+      exam.answers.forEach(answer => {
+        if (answer.audioUrl && !audioUrls.includes(answer.audioUrl)) {
+          audioUrls.push(answer.audioUrl);
+        }
+      });
+    }
+    
+    // Yig'ilgan barcha audio fayllarni o'chirish
+    for (const audioUrl of audioUrls) {
       // Extract filename from URL - handle both relative and absolute URLs
-      const fileName = response.audioUrl.includes('/') 
-        ? response.audioUrl.split('/').pop() 
-        : response.audioUrl;
+      const fileName = audioUrl.includes('/') 
+        ? audioUrl.split('/').pop() 
+        : audioUrl;
         
       const filePath = path.join(__dirname, '../uploads', fileName);
       
