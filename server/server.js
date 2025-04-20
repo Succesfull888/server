@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 const authRoutes = require('./routes/auth');
 const examRoutes = require('./routes/exam');
@@ -17,11 +18,38 @@ app.use(cors({
     'https://new-cefr-exam-p2j2.vercel.app',
     'http://localhost:3000'
   ],
-  credentials: true
+  credentials: true,
+  exposedHeaders: ['Content-Disposition'] // Audio fayllarni yuklashda kerak
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+//---- Static fayllar uchun middleware - yuklangan audio fayllarni yetkazib berish uchun
+// Uploads papkasi mavjud emas bo'lsa, yaratish
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log(`Created uploads directory at: ${uploadsDir}`);
+}
+
+// Static fayllar middleware
+app.use('/uploads', express.static(uploadsDir, {
+  setHeaders: (res, filePath) => {
+    // Audio fayllar uchun to'g'ri Content-Type o'rnatish
+    if (filePath.endsWith('.mp3')) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+    } else if (filePath.endsWith('.wav')) {
+      res.setHeader('Content-Type', 'audio/wav');
+    } else if (filePath.endsWith('.webm')) {
+      res.setHeader('Content-Type', 'audio/webm');
+    }
+    
+    // Cache control - browserni keshni to'g'ri boshqarishi uchun
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // 1 day cache
+  }
+}));
+
+console.log(`Static files are served from: ${uploadsDir}`);
 
 //---- Mongoose connection
 // Atlas'dan olingan URI
@@ -58,6 +86,7 @@ mongoose.connect(MONGODB_URI, {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
+    console.log(`🎤 Audio files will be stored in: ${uploadsDir}`);
   });
 })
 .catch(err => {
@@ -81,6 +110,38 @@ mongoose.connection.on('error', err => console.error('⚠️  MongoDB error:', e
 mongoose.connection.on('reconnected', () => console.log('✅ MongoDB reconnected'));
 mongoose.connection.on('connected', () => console.log('✅ MongoDB connected event fired'));
 
+// Log request debugging middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  if (req.originalUrl.startsWith('/uploads/')) {
+    console.log(`Serving static file: ${req.originalUrl}`);
+  }
+  next();
+});
+
+//---- Audio file check endpoint - audio fayllar mavjudligini tekshirish uchun
+app.get('/api/check-audio/:filename', (req, res) => {
+  const filename = req.params.filename;
+  const filePath = path.join(uploadsDir, filename);
+  
+  if (fs.existsSync(filePath)) {
+    const stats = fs.statSync(filePath);
+    res.json({
+      exists: true,
+      filename,
+      size: stats.size,
+      url: `/uploads/${filename}`,
+      fullUrl: `${req.protocol}://${req.get('host')}/uploads/${filename}`
+    });
+  } else {
+    res.status(404).json({
+      exists: false,
+      filename,
+      message: 'Audio file not found'
+    });
+  }
+});
+
 //---- Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/exams', examRoutes);
@@ -96,6 +157,27 @@ app.get('/api/health', (req, res) => {
     3: 'disconnecting'
   }[mongoStatus];
   
+  // Uploads directory status
+  let uploadsStatus = 'unknown';
+  try {
+    if (fs.existsSync(uploadsDir)) {
+      const stats = fs.statSync(uploadsDir);
+      uploadsStatus = stats.isDirectory() ? 'ok' : 'not_directory';
+      
+      // Count files in uploads directory
+      const files = fs.readdirSync(uploadsDir);
+      uploadsStatus = {
+        status: 'ok',
+        files: files.length,
+        writable: fs.accessSync(uploadsDir, fs.constants.W_OK) || true
+      };
+    } else {
+      uploadsStatus = 'missing';
+    }
+  } catch (err) {
+    uploadsStatus = `error: ${err.message}`;
+  }
+  
   res.json({ 
     status: 'ok', 
     timestamp: Date.now(),
@@ -104,14 +186,9 @@ app.get('/api/health', (req, res) => {
       status: statusText,
       readyState: mongoStatus,
       database: mongoose.connection.name
-    }
+    },
+    uploads: uploadsStatus
   });
-});
-
-// Debug middleware - so'rovlarni log qilish uchun
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
-  next();
 });
 
 //---- 404 Not Found handler
