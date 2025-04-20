@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 
+// Schema lar va modellar
 const QuestionSchema = new mongoose.Schema({
   question: {
     type: String,
@@ -40,6 +41,39 @@ const ExamTemplateSchema = new mongoose.Schema({
   }
 });
 
+// Yangilangan Answer sxemasi - to'liq ma'lumotlarni saqlash
+const AnswerSchema = new mongoose.Schema({
+  question: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ExamQuestion'  // ExamTemplate-dagi Question ga reference
+  },
+  questionData: {
+    question: String,
+    questionType: {
+      type: String,
+      enum: ['text', 'image', 'table'],
+      default: 'text'
+    }, 
+    imageUrl: String,
+    tableData: {
+      topic: String,
+      columns: [String],
+      rows: [[String]]
+    },
+    part: Number
+  },
+  audioUrl: {
+    type: String,
+    required: true
+  },
+  score: {
+    type: Number,
+    default: 0
+  },
+  feedback: String
+});
+
+// Eski Response sxemasini saqlab qolish
 const ResponseSchema = new mongoose.Schema({
   questionId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -75,7 +109,9 @@ const ExamSchema = new mongoose.Schema({
     ref: 'ExamTemplate',
     required: true
   },
-  responses: [ResponseSchema],
+  // Ikkala ma'lumot turini saqlab qolish
+  responses: [ResponseSchema], // Eskirgan format
+  answers: [AnswerSchema],     // Yangi format
   feedback: [FeedbackSchema],
   totalScore: {
     type: Number,
@@ -93,7 +129,9 @@ const ExamSchema = new mongoose.Schema({
   evaluatedAt: Date
 });
 
+// Question o'zining modeli bilan
+const ExamQuestion = mongoose.model('ExamQuestion', QuestionSchema);
 const ExamTemplate = mongoose.model('ExamTemplate', ExamTemplateSchema);
 const Exam = mongoose.model('Exam', ExamSchema);
 
-module.exports = { ExamTemplate, Exam };
+module.exports = { ExamTemplate, Exam, ExamQuestion };
